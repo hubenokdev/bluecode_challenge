@@ -15,7 +15,7 @@ CREATE TABLE payments (
 
 CREATE TABLE refunds (
     id uuid default uuid_generate_v4() PRIMARY KEY UNIQUE,
-    payment_id uuid REFERENCES payments(id) NOT NULL UNIQUE,
+    payment_id uuid REFERENCES payments(id) NOT NULL,
     amount integer NOT NULL,
     inserted_at timestamp not null default current_timestamp,
     updated_at timestamp not null default current_timestamp

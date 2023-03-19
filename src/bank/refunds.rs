@@ -2,6 +2,8 @@ use sqlx::PgPool;
 use time::PrimitiveDateTime;
 use uuid::Uuid;
 
+use crate::bank_web::refunds::ResponseData;
+
 /// Module and schema representing a refund.
 ///
 /// A refund is always tied to a specific payment record, but it is possible
@@ -21,19 +23,59 @@ pub struct Refund {
     pub updated_at: PrimitiveDateTime,
 }
 
-pub async fn insert(pool: &PgPool, payment_id: Uuid, amount: i32) -> Result<Uuid, sqlx::Error> {
-    sqlx::query!(
-        r#"
-            INSERT INTO refunds ( payment_id, amount)
-            VALUES ( $1, $2 )
-            RETURNING id
-        "#,
-        payment_id,
-        amount,
-    )
-    .fetch_one(pool)
-    .await
-    .map(|record| record.id)
+pub async fn insert(pool: &PgPool, payment_id: Uuid, amount: i32) -> Result<ResponseData, sqlx::Error> {
+    let pay = crate::bank::payments::get(pool, payment_id).await;
+    match pay {
+        Ok(x) => {
+            let payment_fund = x.amount;
+            let refund = get_payment_refund(pool, x.id).await?;
+            match refund {
+                Some(refund) => {
+                    let total = refund.amount + amount;
+                    if total <= payment_fund {
+                        let s = sqlx::query!(
+                            r#"
+                                UPDATE refunds SET amount = $1 WHERE payment_id =$2
+                                RETURNING *
+                            "#,
+                            total,
+                            payment_id,
+                        )
+                        .fetch_one(pool)
+                        .await?;
+                    let res = ResponseData::new(s.id, s.payment_id, s.amount);
+                    Ok(res)
+                    } else {
+                        Err(sqlx::Error::Protocol(
+                            "The amount is more than the refundable amount".to_string(),
+                        ))
+                    }
+                }
+                None => {
+                    if payment_fund >= amount {
+                        let query = sqlx::query!(
+                            r#"
+                                INSERT INTO refunds ( payment_id, amount)
+                                VALUES ( $1, $2 )
+                                RETURNING *
+                            "#,
+                            payment_id,
+                            amount,
+                        )
+                        .fetch_one(pool)
+                        .await?;
+                        let res = ResponseData::new(query.id, query.payment_id, query.amount);
+                    Ok(res)
+                    } else {
+                        Err(sqlx::Error::Protocol(
+                            "The amount is more than the refundable amount".to_string(),
+                        ))
+                    }
+                }
+            }
+        }
+        Err(err) => Err(err),
+    }
 }
 
 pub async fn get(pool: &PgPool, id: Uuid) -> Result<Refund, sqlx::Error> {
@@ -46,6 +88,22 @@ pub async fn get(pool: &PgPool, id: Uuid) -> Result<Refund, sqlx::Error> {
         id
     )
     .fetch_one(pool)
+    .await
+}
+
+pub async fn get_payment_refund(
+    pool: &PgPool,
+    payment_id: Uuid,
+) -> Result<Option<Refund>, sqlx::Error> {
+    sqlx::query_as!(
+        Refund,
+        r#"
+            SELECT id, payment_id, amount, inserted_at, updated_at FROM refunds
+            WHERE payment_id = $1
+        "#,
+        payment_id
+    )
+    .fetch_optional(pool)
     .await
 }
 
@@ -63,7 +121,7 @@ pub mod tests {
 
             let id = insert(pool, payment.id, REFUND_AMOUNT).await?;
 
-            get(pool, id).await
+            get(pool, id.id).await
         }
     }
 

@@ -26,10 +26,10 @@ async fn main() {
 
     let pool = pg_pool().await.expect("failed to connect to postgres");
 
-    sqlx::migrate!()
-        .run(&pool)
-        .await
-        .expect("failed to run sqlx migrations");
+    // sqlx::migrate!()
+    //     .run(&pool)
+    //     .await
+    //     .expect("failed to run sqlx migrations");
 
     let account_service = bank::accounts::DummyService::default();
     let router = BankWeb::new(pool, account_service).into_router();

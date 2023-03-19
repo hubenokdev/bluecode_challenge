@@ -8,7 +8,7 @@ use sqlx::PgPool;
 use crate::bank::accounts::AccountService;
 
 mod payments;
-mod refunds;
+pub mod refunds;
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub struct ErrorResponseBody {

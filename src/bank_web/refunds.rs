@@ -21,11 +21,20 @@ pub struct RequestBody {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ResponseData {
-    id: Uuid,
+    pub id: Uuid,
     amount: i32,
     payment_id: Uuid,
 }
 
+impl ResponseData {
+    pub fn new(id: Uuid, payment_id: Uuid, amount: i32) -> ResponseData {
+        Self {
+            id,
+            amount,
+            payment_id,
+        }
+    }
+}
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ResponseBody {
     data: ResponseData,
@@ -43,11 +52,7 @@ pub async fn post<T: AccountService>(
     Ok((
         StatusCode::CREATED,
         Json(ResponseBody {
-            data: ResponseData {
-                id: refund_id,
-                amount: body.refund.amount,
-                payment_id,
-            },
+            data: refund_id
         }),
     ))
 }
