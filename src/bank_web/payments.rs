@@ -37,28 +37,110 @@ pub async fn post<T: AccountService>(
     State(bank_web): State<BankWeb<T>>,
     Json(body): Json<RequestBody>,
 ) -> Result<(StatusCode, Json<ResponseBody>), (StatusCode, Json<ErrorResponseBody>)> {
-    let payment_id = payments::insert(
-        &bank_web.pool,
-        body.payment.amount,
-        body.payment.card_number,
-        payments::Status::Approved,
-    )
-    .await
-    .unwrap();
+    let payment_id: Uuid;
 
-    let payment = payments::get(&bank_web.pool, payment_id).await.unwrap();
+    if body.payment.amount == 0 {
+        return Err((
+            StatusCode::NO_CONTENT,
+            Json(ErrorResponseBody {
+                error: "zero amount".to_owned(),
+            }),
+        ));
+    }
 
-    Ok((
-        StatusCode::CREATED,
-        Json(ResponseBody {
-            data: ResponseData {
-                id: payment.id,
-                amount: payment.amount,
-                card_number: payment.card_number,
-                status: payment.status,
-            },
-        }),
-    ))
+    let hold = bank_web
+        .account_service
+        .place_hold(&body.payment.card_number, body.payment.amount)
+        .await;
+
+    match hold {
+        Ok(_) => {
+            match payments::insert(
+                &bank_web.pool,
+                body.payment.amount,
+                body.payment.card_number,
+                payments::Status::Approved,
+            )
+            .await
+            {
+                Ok(some_payment_id) => {
+                    bank_web
+                        .account_service
+                        .withdraw_funds(hold.unwrap())
+                        .await
+                        .unwrap();
+                    payment_id = some_payment_id;
+                    let payment = payments::get(&bank_web.pool, payment_id).await.unwrap();
+                    return Ok((
+                        StatusCode::CREATED,
+                        Json(ResponseBody {
+                            data: ResponseData {
+                                id: payment.id,
+                                amount: payment.amount,
+                                card_number: payment.card_number,
+                                status: payment.status,
+                            },
+                        }),
+                    ));
+                }
+                Err(_) => {
+                    bank_web
+                        .account_service
+                        .release_hold(hold.unwrap())
+                        .await
+                        .unwrap();
+                    return Err((
+                        StatusCode::UNPROCESSABLE_ENTITY,
+                        Json(ErrorResponseBody {
+                            error: "card_number already used".to_owned(),
+                        }),
+                    ));
+                }
+            }
+        }
+        Err(errmsg) => match errmsg.as_str() {
+            "invalid_account_number" => {
+                return Ok((
+                    StatusCode::FORBIDDEN,
+                    Json(ResponseBody {
+                        data: ResponseData {
+                            id: Uuid::nil(),
+                            amount: body.payment.amount,
+                            card_number: body.payment.card_number,
+                            status: payments::Status::Declined,
+                        },
+                    }),
+                ));
+            }
+            "invalid_amount" => {
+                return Err((
+                    StatusCode::BAD_REQUEST,
+                    Json(ErrorResponseBody {
+                        error: "invalid amount".to_owned(),
+                    }),
+                ))
+            }
+            "insufficient_funds" => {
+                return Ok((
+                    StatusCode::PAYMENT_REQUIRED,
+                    Json(ResponseBody {
+                        data: ResponseData {
+                            id: Uuid::nil(),
+                            amount: body.payment.amount,
+                            card_number: body.payment.card_number,
+                            status: payments::Status::Declined,
+                        },
+                    }),
+                ));
+            }
+            _ => Err((
+                StatusCode::NO_CONTENT,
+                Json(ErrorResponseBody {
+                    error: "cannot process the request".to_owned(),
+                }),
+            )),
+        },
+    }
 }
 
 pub async fn get<T: AccountService>(

@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::{BankWeb, ErrorResponseBody};
-use crate::bank::{accounts::AccountService, refunds};
+use crate::bank::{accounts::AccountService, payments, refunds};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct RequestData {
@@ -36,20 +36,44 @@ pub async fn post<T: AccountService>(
     Path(payment_id): Path<Uuid>,
     Json(body): Json<RequestBody>,
 ) -> Result<(StatusCode, Json<ResponseBody>), (StatusCode, Json<ErrorResponseBody>)> {
-    let refund_id = refunds::insert(&bank_web.pool, payment_id, body.refund.amount)
-        .await
-        .unwrap();
+    let check_existence_and_validity = payments::get(&bank_web.pool, payment_id).await;
 
-    Ok((
-        StatusCode::CREATED,
-        Json(ResponseBody {
-            data: ResponseData {
-                id: refund_id,
-                amount: body.refund.amount,
-                payment_id,
-            },
-        }),
-    ))
+    match check_existence_and_validity {
+        Ok(some_payment_id) => {
+            if some_payment_id.amount < body.refund.amount {
+                return Err((
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    Json(ErrorResponseBody {
+                        error: "excessive refund amount requested".to_owned(),
+                    }),
+                ));
+            }
+
+            let refund_id = refunds::insert(&bank_web.pool, payment_id, body.refund.amount)
+                .await
+                .unwrap();
+
+            Ok((
+                StatusCode::CREATED,
+                Json(ResponseBody {
+                    data: ResponseData {
+                        id: refund_id,
+                        amount: body.refund.amount,
+                        payment_id,
+                    },
+                }),
+            ))
+        }
+        Err(some_errr) => {
+            println!("refund error: {some_errr}");
+            Err((
+                StatusCode::NOT_FOUND,
+                Json(ErrorResponseBody {
+                    error: "payment_id doesn't exist".to_owned(),
+                }),
+            ))
+        }
+    }
 }
 
 pub async fn get<T: AccountService>(
