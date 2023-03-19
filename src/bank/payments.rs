@@ -36,20 +36,13 @@ pub async fn insert(
     card_number: String,
     status: Status,
 ) -> Result<Uuid, sqlx::Error> {
-    sqlx::query!(
-        r#"
-            INSERT INTO payments ( id, amount, card_number, status, inserted_at, updated_at )
-            VALUES ( $1, $2, $3, $4, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP )
-            RETURNING id
-        "#,
-        Uuid::new_v4(),
-        amount,
-        card_number,
-        status as Status
-    )
+    let row: (Uuid,) = sqlx::query_as(&format!(
+        "INSERT INTO payments ( amount, card_number, status ) VALUES ('{amount}', '{card_number}', '{status:?}') RETURNING id"
+    ))
     .fetch_one(pool)
-    .await
-    .map(|record| record.id)
+    .await?;
+
+    Ok(row.0)
 }
 
 pub async fn get(pool: &PgPool, id: Uuid) -> Result<Payment, sqlx::Error> {

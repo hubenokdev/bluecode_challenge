@@ -24,11 +24,10 @@ pub struct Refund {
 pub async fn insert(pool: &PgPool, payment_id: Uuid, amount: i32) -> Result<Uuid, sqlx::Error> {
     sqlx::query!(
         r#"
-            INSERT INTO refunds ( id, payment_id, amount, inserted_at, updated_at )
-            VALUES ( $1, $2, $3, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP )
+            INSERT INTO refunds ( payment_id, amount)
+            VALUES ( $1, $2 )
             RETURNING id
         "#,
-        Uuid::new_v4(),
         payment_id,
         amount,
     )
