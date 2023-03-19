@@ -7,7 +7,8 @@ use crate::bank_web::BankWeb;
 
 mod bank;
 mod bank_web;
-
+pub mod errors;
+pub use errors::*;
 pub async fn pg_pool() -> Result<PgPool, sqlx::Error> {
     dotenv().expect("failed to load .env");
 

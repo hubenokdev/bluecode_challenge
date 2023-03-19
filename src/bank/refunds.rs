@@ -3,6 +3,9 @@ use time::PrimitiveDateTime;
 use uuid::Uuid;
 
 use crate::bank_web::refunds::ResponseData;
+use crate::errors::CustomError;
+
+use super::payments::Status;
 
 /// Module and schema representing a refund.
 ///
@@ -23,58 +26,79 @@ pub struct Refund {
     pub updated_at: PrimitiveDateTime,
 }
 
-pub async fn insert(pool: &PgPool, payment_id: Uuid, amount: i32) -> Result<ResponseData, sqlx::Error> {
+// Store the refund details in the database
+pub async fn insert(
+    pool: &PgPool,
+    payment_id: Uuid,
+    amount: i32,
+) -> Result<ResponseData, CustomError> {
+    // Gettting the payment details from payment table
     let pay = crate::bank::payments::get(pool, payment_id).await;
+    // Checkking a valid payment is there if thre then
     match pay {
         Ok(x) => {
             let payment_fund = x.amount;
-            let refund = get_payment_refund(pool, x.id).await?;
-            match refund {
-                Some(refund) => {
-                    let total = refund.amount + amount;
-                    if total <= payment_fund {
-                        let s = sqlx::query!(
-                            r#"
-                                UPDATE refunds SET amount = $1 WHERE payment_id =$2
-                                RETURNING *
-                            "#,
-                            total,
-                            payment_id,
-                        )
-                        .fetch_one(pool)
-                        .await?;
-                    let res = ResponseData::new(s.id, s.payment_id, s.amount);
-                    Ok(res)
-                    } else {
-                        Err(sqlx::Error::Protocol(
-                            "The amount is more than the refundable amount".to_string(),
-                        ))
+                if x.status == Status::Approved{
+                // check any refund is there already claimed, if there check with the claimed refund amount and this amout with payment
+                let refund = get_payment_refund(pool, x.id).await?;
+                match refund {
+                    Some(refund) => {
+                        let total = refund.amount + amount;
+                        if total <= payment_fund {
+                            let s = sqlx::query!(
+                                r#"
+                                    UPDATE refunds SET amount = $1 WHERE payment_id =$2
+                                    RETURNING *
+                                "#,
+                                total,
+                                payment_id,
+                            )
+                            .fetch_one(pool)
+                            .await?;
+                            let res = ResponseData::new(s.id, s.payment_id, s.amount);
+                            Ok(res)
+                        } else {
+                            Err(CustomError::AmoutRefundFailed {
+                                message: "The amount is more than the refundable amount".to_string(),
+                                code: 422,
+                            })
+                        }
+                    }
+                    // None of the refund claimed then insert a new refund
+                    None => {
+                        if payment_fund >= amount {
+                            let query = sqlx::query!(
+                                r#"
+                                    INSERT INTO refunds ( payment_id, amount)
+                                    VALUES ( $1, $2 )
+                                    RETURNING *
+                                "#,
+                                payment_id,
+                                amount,
+                            )
+                            .fetch_one(pool)
+                            .await?;
+                            let res = ResponseData::new(query.id, query.payment_id, query.amount);
+                            Ok(res)
+                        } else {
+                            Err(CustomError::AmoutRefundFailed {
+                                message: "The amount is more than the refundable amount".to_string(),
+                                code: 422,
+                            })
+                        }
                     }
                 }
-                None => {
-                    if payment_fund >= amount {
-                        let query = sqlx::query!(
-                            r#"
-                                INSERT INTO refunds ( payment_id, amount)
-                                VALUES ( $1, $2 )
-                                RETURNING *
-                            "#,
-                            payment_id,
-                            amount,
-                        )
-                        .fetch_one(pool)
-                        .await?;
-                        let res = ResponseData::new(query.id, query.payment_id, query.amount);
-                    Ok(res)
-                    } else {
-                        Err(sqlx::Error::Protocol(
-                            "The amount is more than the refundable amount".to_string(),
-                        ))
-                    }
-                }
+            }else {
+                Err(CustomError::PaymentNotExist {
+                    code: 404,
+                    message: format!("Failed to refund the amount "),
+                })
             }
         }
-        Err(err) => Err(err),
+        Err(err) => Err(CustomError::PaymentNotExist {
+            code: 404,
+            message: format!("Failed to refund the amount {}", err),
+        }),
     }
 }
 
@@ -91,6 +115,7 @@ pub async fn get(pool: &PgPool, id: Uuid) -> Result<Refund, sqlx::Error> {
     .await
 }
 
+// Query payment refund details from the database
 pub async fn get_payment_refund(
     pool: &PgPool,
     payment_id: Uuid,
@@ -116,12 +141,15 @@ pub mod tests {
     pub const REFUND_AMOUNT: i32 = 42;
 
     impl Refund {
-        pub async fn new_test(pool: &PgPool) -> Result<Refund, sqlx::Error> {
+        pub async fn new_test(pool: &PgPool) -> Result<Refund, CustomError> {
             let payment = Payment::new_test(pool).await?;
 
             let id = insert(pool, payment.id, REFUND_AMOUNT).await?;
 
-            get(pool, id.id).await
+            match get(pool, id.id).await{
+                Ok(x) => Ok(x),
+                Err(e) => Err(CustomError::from(e)),
+            }
         }
     }
 

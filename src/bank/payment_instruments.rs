@@ -1,12 +1,20 @@
-use std::num::ParseIntError;
+use std::{num::ParseIntError, fmt::Display};
+
+use thiserror::Error;
 
 const CARD_NUMBER_LENGTH: usize = 15;
 const ACCOUNT_PREFIX_LENGTH: usize = 2;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum CardError {
     InvalidLength,
     ParseError(ParseIntError),
+}
+
+impl Display for CardError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self)
+    }
 }
 
 /// Represents a virtual credit card used for payments.
@@ -17,7 +25,7 @@ pub enum CardError {
 /// Each time it is used a different card number is generated and provided
 /// to merchants for payment.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Card(String);
+pub struct Card(pub String);
 
 impl TryFrom<String> for Card {
     type Error = CardError;

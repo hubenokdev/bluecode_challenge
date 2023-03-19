@@ -3,6 +3,8 @@ use sqlx::PgPool;
 use time::PrimitiveDateTime;
 use uuid::Uuid;
 
+use super::{accounts::DummyService, payment_instruments::Card};
+use crate::{bank::accounts::AccountService, CustomError, PaymentError};
 #[derive(Debug, Clone, PartialEq, Eq, Copy, Serialize, Deserialize, sqlx::Type)]
 #[serde(rename_all = "snake_case")]
 pub enum Status {
@@ -35,14 +37,27 @@ pub async fn insert(
     amount: i32,
     card_number: String,
     status: Status,
-) -> Result<Uuid, sqlx::Error> {
-    let row: (Uuid,) = sqlx::query_as(&format!(
+) -> Result<Uuid, CustomError> {
+    let account_service = DummyService::default();
+    let card =match Card::try_from(card_number.clone()){
+        Ok(c) => c,
+        Err(e) => return Err(CustomError::from(e)),
+    };
+    match account_service
+        .place_hold(card.account_number(), amount)
+        .await
+    {
+        Ok(_x) => {
+            let row: (Uuid,) = sqlx::query_as(&format!(
         "INSERT INTO payments ( amount, card_number, status ) VALUES ('{amount}', '{card_number}', '{status:?}') RETURNING id"
     ))
     .fetch_one(pool)
     .await?;
 
-    Ok(row.0)
+            Ok(row.0)
+        }
+        Err(e) => Err(CustomError::PaymentError(PaymentError::from(&e))),
+    }
 }
 
 pub async fn get(pool: &PgPool, id: Uuid) -> Result<Payment, sqlx::Error> {
@@ -68,12 +83,15 @@ pub mod tests {
     pub const PAYMENT_STATUS: Status = Status::Approved;
 
     impl Payment {
-        pub async fn new_test(pool: &PgPool) -> Result<Payment, sqlx::Error> {
+        pub async fn new_test(pool: &PgPool) -> Result<Payment, CustomError> {
             let card = Card::new_test();
 
             let id = insert(pool, PAYMENT_AMOUNT, card.into(), PAYMENT_STATUS).await?;
 
-            get(pool, id).await
+            match get(pool, id).await{
+                Ok(x) => Ok(x),
+                Err(e) => Err(CustomError::from(e)),
+            }
         }
     }
 
