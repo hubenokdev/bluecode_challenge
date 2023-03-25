@@ -1,11 +1,9 @@
-use std::{num::ParseIntError, fmt::Display};
-
-use thiserror::Error;
+use std::{fmt::Display, num::ParseIntError};
 
 const CARD_NUMBER_LENGTH: usize = 15;
 const ACCOUNT_PREFIX_LENGTH: usize = 2;
 
-#[derive(Debug, Clone, PartialEq, Eq, Error)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CardError {
     InvalidLength,
     ParseError(ParseIntError),

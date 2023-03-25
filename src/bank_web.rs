@@ -8,11 +8,18 @@ use sqlx::PgPool;
 use crate::bank::accounts::AccountService;
 
 mod payments;
-pub mod refunds;
+mod refunds;
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub struct ErrorResponseBody {
     error: String,
+}
+impl ErrorResponseBody {
+    pub fn new(s: &'static str) -> Self {
+        Self {
+            error: s.to_string(),
+        }
+    }
 }
 
 #[derive(Clone)]
